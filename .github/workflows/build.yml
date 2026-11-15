@@ -1,0 +1,37 @@
+name: Compilar APKs (TV y Celular)
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Configurar Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Instalar Gradle y Compilar APKs
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.5'
+          arguments: assembleDebug
+
+      - name: Subir APK de TV (Emisor)
+        uses: actions/upload-artifact@v4
+        with:
+          name: 1-APK-TV-Emisor
+          path: tv/build/outputs/apk/debug/tv-debug.apk
+
+      - name: Subir APK de Celular (Receptor)
+        uses: actions/upload-artifact@v4
+        with:
+          name: 2-APK-Celular-Receptor
+          path: mobile/build/outputs/apk/debug/mobile-debug.apk
