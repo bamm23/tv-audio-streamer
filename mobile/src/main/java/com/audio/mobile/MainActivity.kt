@@ -39,7 +39,6 @@ class MainActivity : Activity() {
             setPadding(50, 40, 50, 40)
         }
 
-        // --- SECCIÓN 1: CONEXIÓN IP ---
         val tvLabel = TextView(this).apply {
             text = "IP DEL TELEVISOR:"
             textSize = 15f
@@ -55,16 +54,15 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
         }
 
-        // --- SECCIÓN 2: VOLUMEN 1 (TELEVISOR CON AMPLIFICADOR 200%) ---
         val tvVolTv = TextView(this).apply {
             text = "1. Volumen de la Tele: ${(ReceiverService.tvVolume * 100).toInt()}%"
             textSize = 17f
             setTextColor(Color.parseColor("#00E676"))
-            setPadding(0, 35, 0, 10)
+            setPadding(0, 30, 0, 10)
         }
 
         val seekVolTv = SeekBar(this).apply {
-            max = 200 // Permite hasta 200% (Amplificador de películas bajas)
+            max = 200
             progress = (ReceiverService.tvVolume * 100).toInt()
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(s: SeekBar?, p: Int, b: Boolean) {
@@ -77,7 +75,6 @@ class MainActivity : Activity() {
             })
         }
 
-        // --- SECCIÓN 3: VOLUMEN 2 (LLAMADA / CELULAR) ---
         val maxCallVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
         val curCallVol = audioManager.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
 
@@ -85,7 +82,7 @@ class MainActivity : Activity() {
             text = "2. Volumen Llamada (WhatsApp/Discord): ${(curCallVol * 100) / maxOf(1, maxCallVol)}%"
             textSize = 17f
             setTextColor(Color.parseColor("#29B6F6"))
-            setPadding(0, 30, 0, 10)
+            setPadding(0, 25, 0, 10)
         }
 
         val seekVolCall = SeekBar(this).apply {
@@ -93,7 +90,6 @@ class MainActivity : Activity() {
             progress = curCallVol
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(s: SeekBar?, p: Int, b: Boolean) {
-                    // Ajusta el volumen de la llamada en el sistema Android
                     audioManager.setStreamVolume(AudioManager.STREAM_VOICE_CALL, p, 0)
                     val pct = (p * 100) / maxOf(1, maxCallVol)
                     tvVolCall.text = "2. Volumen Llamada (WhatsApp/Discord): $pct%"
@@ -103,13 +99,28 @@ class MainActivity : Activity() {
             })
         }
 
-        // --- SECCIÓN 4: SINCRONIZACIÓN DE LABIOS (- / +) ---
+        // --- INTERRUPTOR PARA FORZAR ALTA CALIDAD (A2DP) EN LLAMADAS ---
+        val chkForceHd = CheckBox(this).apply {
+            text = "Mantener Calidad HD en llamada (Usa el micrófono del celular para no bajar la calidad de los audífonos)"
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            isChecked = ReceiverService.forceHdAudio
+            setPadding(10, 25, 10, 15)
+            setOnCheckedChangeListener { _, isChecked ->
+                ReceiverService.forceHdAudio = isChecked
+                if (isChecked) {
+                    audioManager.isBluetoothScoOn = false
+                    audioManager.stopBluetoothSco()
+                }
+            }
+        }
+
         val tvSyncLabel = TextView(this).apply {
             text = getSyncText(ReceiverService.syncOffsetMs)
             textSize = 16f
             setTextColor(Color.YELLOW)
             gravity = Gravity.CENTER
-            setPadding(0, 35, 0, 15)
+            setPadding(0, 20, 0, 15)
         }
 
         val syncRow = LinearLayout(this).apply {
@@ -121,7 +132,6 @@ class MainActivity : Activity() {
             text = " - Adelantar "
             textSize = 15f
             setOnClickListener {
-                // Reduce delay activando purga agresiva de búfer (hasta -100ms de compensación)
                 ReceiverService.syncOffsetMs = maxOf(-100, ReceiverService.syncOffsetMs - 10)
                 ReceiverService.triggerFlush = true
                 tvSyncLabel.text = getSyncText(ReceiverService.syncOffsetMs)
@@ -151,7 +161,6 @@ class MainActivity : Activity() {
         syncRow.addView(btnZero)
         syncRow.addView(btnPlus)
 
-        // --- SECCIÓN 5: BOTÓN DE CONEXIÓN ---
         val btnConnect = Button(this).apply {
             text = if (ReceiverService.isRunning) "DESCONECTAR" else "CONECTAR AL TV"
             textSize = 20f
@@ -159,7 +168,7 @@ class MainActivity : Activity() {
             val params = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { topMargin = 45 }
+            ).apply { topMargin = 35 }
             layoutParams = params
 
             setOnClickListener {
@@ -184,6 +193,7 @@ class MainActivity : Activity() {
         layout.addView(seekVolTv)
         layout.addView(tvVolCall)
         layout.addView(seekVolCall)
+        layout.addView(chkForceHd)
         layout.addView(tvSyncLabel)
         layout.addView(syncRow)
         layout.addView(btnConnect)
@@ -194,7 +204,7 @@ class MainActivity : Activity() {
 
     private fun getSyncText(ms: Int): String {
         return when {
-            ms < 0 -> "Sincronización: $ms ms (Modo Ultra-Rápido / Anti-Delay)"
+            ms < 0 -> "Sincronización: $ms ms (Modo Anti-Delay)"
             ms > 0 -> "Sincronización: +$ms ms (Audio retrasado)"
             else -> "Sincronización: 0 ms (Tiempo real)"
         }
@@ -207,11 +217,11 @@ class ReceiverService : Service() {
         @Volatile var tvVolume = 1.0f
         @Volatile var syncOffsetMs = 0
         @Volatile var triggerFlush = false
+        @Volatile var forceHdAudio = true
         private var audioTrack: AudioTrack? = null
 
         fun updateTvVolume(v: Float) {
             tvVolume = v
-            // Si el volumen es menor o igual a 100%, usa ganancia nativa; si supera 100%, amplifica por software
             try { audioTrack?.setVolume(minOf(1.0f, v)) } catch (e: Exception) {}
         }
     }
@@ -227,8 +237,8 @@ class ReceiverService : Service() {
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(channelId, "Receptor TV", NotificationManager.IMPORTANCE_LOW))
         val notif = Notification.Builder(this, channelId)
-            .setContentTitle("Audio de TV + Llamada Activo")
-            .setContentText("Sincronización y doble volumen activados")
+            .setContentTitle("Audio de TV + Llamada HD Activo")
+            .setContentText("Sonido estéreo 48kHz protegido")
             .setSmallIcon(android.R.drawable.ic_lock_silent_mode_off)
             .build()
 
@@ -250,20 +260,26 @@ class ReceiverService : Service() {
 
     private fun startReceiving(tvIp: String) {
         isRunning = true
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
         socket = DatagramSocket(50006).apply {
-            // Reducir búfer de red del sistema para evitar que se acumulen paquetes viejos
             receiveBufferSize = 3840
         }
 
+        // Hilo que envía latidos al TV y vigila que Discord no degrade la calidad Bluetooth a SCO (8kHz)
         thread {
             val ping = "PING".toByteArray()
             while (isRunning) {
                 try {
+                    if (forceHdAudio && audioManager.isBluetoothScoOn) {
+                        audioManager.isBluetoothScoOn = false
+                        audioManager.stopBluetoothSco()
+                    }
                     val addr = InetAddress.getByName(tvIp)
                     socket?.send(DatagramPacket(ping, ping.size, addr, 50005))
-                    Thread.sleep(2000)
+                    Thread.sleep(1500)
                 } catch (e: Exception) {
-                    try { Thread.sleep(2000) } catch (ex: Exception) {}
+                    try { Thread.sleep(1500) } catch (ex: Exception) {}
                 }
             }
         }
@@ -286,7 +302,6 @@ class ReceiverService : Service() {
                         .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
                         .build()
                 )
-                // Búfer físico al mínimo posible para eliminar retraso en audífonos
                 .setBufferSizeInBytes(minBuf)
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
@@ -305,7 +320,6 @@ class ReceiverService : Service() {
                     socket?.receive(pkt)
                     packetCounter++
 
-                    // Si el usuario presionó "- Adelantar", vaciamos cualquier paquete acumulado en cola
                     if (triggerFlush) {
                         delayQueue.clear()
                         audioTrack?.pause()
@@ -314,9 +328,8 @@ class ReceiverService : Service() {
                         triggerFlush = false
                     }
 
-                    var dataToPlay = pkt.data.copyOfRange(0, pkt.length)
+                    val dataToPlay = pkt.data.copyOfRange(0, pkt.length)
 
-                    // Si el volumen de la TV está entre 101% y 200%, amplificamos las muestras de audio
                     if (tvVolume > 1.0f) {
                         applyAudioBoost(dataToPlay, tvVolume)
                     }
@@ -324,7 +337,6 @@ class ReceiverService : Service() {
                     val currentOffset = syncOffsetMs
 
                     if (currentOffset > 0) {
-                        // Modo + Retrasar: Cada paquete equivale a 10ms de audio
                         val targetQueueSize = currentOffset / 10
                         delayQueue.add(dataToPlay)
                         if (delayQueue.size > targetQueueSize) {
@@ -334,14 +346,11 @@ class ReceiverService : Service() {
                             }
                         }
                     } else if (currentOffset < 0) {
-                        // Modo - Adelantar (Anti-Delay para audífonos):
-                        // Salta micro-paquetes periódicamente para obligar al audífono a ir al día con el borde en vivo
                         val skipFactor = maxOf(5, 25 + (currentOffset / 5))
                         if (packetCounter % skipFactor != 0) {
                             audioTrack?.write(dataToPlay, 0, dataToPlay.size, AudioTrack.WRITE_NON_BLOCKING)
                         }
                     } else {
-                        // Modo 0ms normal
                         delayQueue.clear()
                         audioTrack?.write(dataToPlay, 0, dataToPlay.size, AudioTrack.WRITE_NON_BLOCKING)
                     }
@@ -350,7 +359,6 @@ class ReceiverService : Service() {
         }
     }
 
-    // Amplificador digital para subir el volumen de la TV hasta el 200% sin distorsión
     private fun applyAudioBoost(pcmBytes: ByteArray, boostFactor: Float) {
         val shortBuf = ByteBuffer.wrap(pcmBytes).order(ByteOrder.nativeOrder()).asShortBuffer()
         for (i in 0 until shortBuf.limit()) {
